@@ -2,13 +2,55 @@ package gam
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 
-	_ "github.com/ClickHouse/clickhouse-go"
+	"github.com/ClickHouse/clickhouse-go"
 )
 
-type AnalyticsData struct {
+type gam struct {
+	tableName string
+	db        *sql.DB
+}
+
+// Init creates a new gam structure by initialising the database connection
+func Init(username, password, hostname, port, databaseName, tableName string, ensureTableExistanceAndSchema, createTableIfNotExists bool) (gam, error) {
+	connectionString := fmt.Sprintf("tcp://%s:%s?username=%s&password=%s&database=%s", hostname, port, username, password, databaseName)
+	db, err := sql.Open("clickhouse", connectionString)
+	if err != nil {
+		return gam{}, err
+	}
+	// Ping the database to verify the connection
+	if err := db.Ping(); err != nil {
+		if exception, ok := err.(*clickhouse.Exception); ok {
+			return gam{}, fmt.Errorf("[%d]: %s \n%s", exception.Code, exception.Message, exception.StackTrace)
+		} else {
+			return gam{}, err
+		}
+	}
+	if ensureTableExistanceAndSchema {
+		exists, err := ensureTableExistsWithTheCorrectForm(db, tableName)
+		if err != nil {
+			// Table exists but has a different schema
+			return gam{}, err
+		}
+		if exists {
+			// Table exists and has the correct schema
+			return gam{tableName: tableName, db: db}, nil
+		}
+	}
+	if createTableIfNotExists {
+		err := createTable(db, tableName)
+		if err != nil {
+			// Error while creating the table with the expected schema
+			return gam{}, err
+		}
+	}
+	return gam{tableName: tableName, db: db}, nil
+}
+
+type analyticsData struct {
 	UserAgent               string
 	IPAddress               string
 	AcceptLanguage          string
@@ -44,7 +86,13 @@ type AnalyticsData struct {
 	TLSCipherSuite          uint16
 }
 
-func extractAnalyticsData(r *http.Request) AnalyticsData {
+// Close closes the active database connection of the current gam instance
+func (g gam) Close() error {
+	return g.db.Close()
+}
+
+// extractAnalyticsData extracts the analytics data from given *http.Request and returns the extracted AnalyseData
+func extractAnalyticsData(r *http.Request) analyticsData {
 	// Extract additional TLS information if available
 	var tlsVersion uint16
 	var tlsCipherSuite uint16
@@ -53,7 +101,7 @@ func extractAnalyticsData(r *http.Request) AnalyticsData {
 		tlsCipherSuite = r.TLS.CipherSuite
 	}
 
-	return AnalyticsData{
+	return analyticsData{
 		UserAgent:               r.UserAgent(),
 		IPAddress:               r.RemoteAddr,
 		AcceptLanguage:          r.Header.Get("Accept-Language"),
@@ -90,11 +138,13 @@ func extractAnalyticsData(r *http.Request) AnalyticsData {
 	}
 }
 
-func AnalyticsMiddleware(db *sql.DB, next http.Handler) http.Handler {
+// Middleware extracts the analytics data from the http.Request object and upload them to the database.
+// If everything goes as expected it passes to the next handler, otherwise it returns an internal server error 500
+func (g gam) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Extract fingerprint
 		fingerprint := extractAnalyticsData(r)
-		err := addAnalyticsDataToDB(db, fingerprint)
+		err := g.addAnalyticsDataToDB(fingerprint)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -104,10 +154,11 @@ func AnalyticsMiddleware(db *sql.DB, next http.Handler) http.Handler {
 	})
 }
 
-func addAnalyticsDataToDB(db *sql.DB, data AnalyticsData) error {
+// addAnalyticsDataToDB upload the AnalyticsData passed in parameters to the database
+func (g gam) addAnalyticsDataToDB(data analyticsData) error {
 	// Insert fingerprint into ClickHouse
-	_, err := db.Exec(`
-INSERT INTO browser_fingerprints (
+	_, err := g.db.Exec(fmt.Sprintf(`
+INSERT INTO %s (
 	user_agent, ip_address, accept_language, accept_encoding, 
 	accept_charset, accept, connection, host, x_forwarded_for, 
 	referer, cookie, dnt, upgrade_insecure_requests, cache_control, 
@@ -115,7 +166,7 @@ INSERT INTO browser_fingerprints (
 	x_forwarded_port, x_amz_date, x_api_key, x_request_id, authorization, 
 	content_type, content_length, method, request_uri, protocol, 
 	transfer_encoding, tls_version, tls_cipher_suite
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, g.tableName),
 		data.UserAgent, data.IPAddress, data.AcceptLanguage,
 		data.AcceptEncoding, data.AcceptCharset, data.Accept,
 		data.Connection, data.Host, data.XForwardedFor,
