@@ -97,7 +97,7 @@ func createTable(db *sql.DB, tableName string) error {
 		expectedSchemaSlice = append(expectedSchemaSlice, fmt.Sprintf("%s %s", key, value))
 		i++
 	}
-	createTableSQL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s ( %s ) ENGINE = MergeTree();", tableName, strings.Join(expectedSchemaSlice, ","))
+	createTableSQL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s ( %s ) ENGINE = MergeTree() ORDER BY (user_agent, ip_address);", tableName, strings.Join(expectedSchemaSlice, ","))
 	_, err := db.Exec(createTableSQL)
 	if err != nil {
 		log.Printf("Error creating table: %v", err)
