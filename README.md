@@ -1,5 +1,8 @@
 # gam
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/Makepad-fr/gam.svg)](https://pkg.go.dev/github.com/Makepad-fr/gam)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Makepad-fr/gam)](https://goreportcard.com/report/github.com/Makepad-fr/gam)
+
 An analytics middleware for Go web servers
 
 ## Install
