@@ -156,8 +156,13 @@ func (g gam) Middleware(next http.Handler) http.Handler {
 
 // addAnalyticsDataToDB upload the AnalyticsData passed in parameters to the database
 func (g gam) addAnalyticsDataToDB(data analyticsData) error {
+	tx, err := g.db.Begin()
+	if err != nil {
+		log.Printf("Error while starting transaction %v", err)
+		return err
+	}
 	// Insert fingerprint into ClickHouse
-	_, err := g.db.Exec(fmt.Sprintf(`
+	_, err = tx.Exec(fmt.Sprintf(`
 INSERT INTO %s (
 	user_agent, ip_address, accept_language, accept_encoding, 
 	accept_charset, accept, connection, host, x_forwarded_for, 
@@ -180,7 +185,13 @@ INSERT INTO %s (
 		data.TLSVersion, data.TLSCipherSuite,
 	)
 	if err != nil {
+		tx.Rollback()
 		log.Printf("Error inserting fingerprint: %v", err)
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		log.Printf("Error while committing transaction %v", err)
 		return err
 	}
 	return nil
