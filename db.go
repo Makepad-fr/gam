@@ -94,7 +94,7 @@ func createTable(db *sql.DB, tableName string) error {
 	expectedSchemaSlice := make([]string, 0, len(expectedSchema))
 	var i = 0
 	for key, value := range expectedSchema {
-		expectedSchemaSlice[i] = fmt.Sprintf("%s %s", key, value)
+		expectedSchemaSlice = append(expectedSchemaSlice, fmt.Sprintf("%s %s", key, value))
 		i++
 	}
 	createTableSQL := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s ( %s ) ENGINE = MergeTree();", tableName, strings.Join(expectedSchemaSlice, ","))
